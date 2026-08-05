@@ -1,182 +1,398 @@
 # UECC-IM2
 
-UECC-IM2 is a MATLAB implementation of an updatable ensemble classifier-chain framework for imbalanced multi-label classification. The current codebase combines label-specific feature selection, binary/trinary label modeling, difficulty-aware minority oversampling, and ensemble voting in a 5-fold evaluation pipeline.
+MATLAB implementation of **UECC-IM2**, an enhanced Updatable Ensemble Classifier Chains framework for class-imbalance mitigation in multi-label classification.
 
-## Overview
+UECC-IM2 combines label-wise feature selection, binary/trinary classifier generation, model selection, difficulty-aware diversity-driven oversampling, and progressive ensemble updating. The current entry script is `run_uecc_im2.m`.
 
-Multi-label class imbalance is more complicated than standard binary imbalance because different labels may have different imbalance severities, and label dependencies can affect both prediction quality and resampling behavior. In this implementation, UECC-IM2 follows a chain-based workflow and updates the training process label by label and round by round.
+## Method Overview
 
-At a high level, the current implementation does the following:
+For each cross-validation fold, UECC-IM2 performs the following steps:
 
-1. **Label-wise feature selection**  
-   For each target label, the model performs feature selection using the original features together with the remaining labels as auxiliary inputs.
+1. Loads the dataset and predefined training/test indices.
+2. Converts the multi-label targets from `{0,1}` to `{-1,+1}`.
+3. Selects a label-specific feature subset for each target label.
+4. Trains two candidate models for each label:
+   - a binary classifier;
+   - a trinary classifier constructed using a selected FRONT label.
+5. Selects the trinary model only when:
+   - its training MCC is higher than that of the binary model; and
+   - the original imbalance ratio of the target label is greater than `1.5`.
+6. Uses the selected model to:
+   - generate train/test predictions;
+   - update the predicted-label feature slots used by subsequent classifiers;
+   - estimate the difficulty of minority-class training samples.
+7. Divides minority samples into difficulty bins and allocates oversampling according to the accumulated difficulty in each bin.
+8. Applies label-diversity-based sample selection within each bin.
+9. Updates the training indices for the next ensemble member.
+10. Aggregates all ensemble predictions through majority voting.
+11. Reports macro-level and minority/majority-oriented evaluation metrics.
 
-2. **Binary and trinary modeling**  
-   For each label, the code trains a standard binary classifier and also builds a trinary-style decomposition using a selected front label. The trinary branch is implemented through `Train_3classes.m` and `Predict_3classes.m`.
-
-3. **Model choice during training**  
-   The implementation compares binary and trinary training behavior with MCC-based selection logic. When the trinary branch is better and the label imbalance is sufficiently strong, the trinary prediction path is used for that label in that ensemble round.
-
-4. **Difficulty-aware minority oversampling**  
-   Minority examples are scored according to prediction difficulty. These samples are bucketed into bins, and the next ensemble round reuses minority samples with a diversity-oriented oversampling strategy.
-
-5. **Ensemble voting**  
-   Multiple rounds are aggregated by voting to produce the final multi-label prediction.
-
-The current main script runs **5-fold cross-validation**, stores fold-level predictions, and reports the following final metrics:
-
-- `MacroF1_each_class`
-- `MCC`
-- `MacroF1_minority`
-- `MacroF1_majority`
-- `ExAcc`
-
-## Repository structure
-
-A typical directory layout is:
+## Repository Structure
 
 ```text
 UECC-IM2/
-├── BaseClassifierPredict.m
-├── BaseClassifierTrain.m
-├── cal_IR.m
-├── label_diversity_oversampling.m
-├── Predict_3classes.m
-├── Train_3classes.m
-├── select_best_front_preference.m
-├── run_uecc_im2.m
 ├── data/
-├── imbalance_characterization/
-├── label_order/
+│   ├── <dataset>.mat
+│   └── <dataset>_5folds.mat
+├── label order/
+│   └── label-order-related functions
+├── metrics/
+│   └── evaluation metric functions
 ├── liblinear/
-└── metrics/
+│   └── MATLAB interface of LIBLINEAR
+├── imbalance_characterization/
+│   └── imbalance-related utility functions
+├── BaseClassifierTrain.m
+├── BaseClassifierPredict.m
+├── cal_IR.m
+├── IRLbl.m
+├── Copy_of_scumble_between_labels.m
+├── select_best_front_preference.m
+├── featureSelection_improved.m
+├── run_uecc_im2.m
+└── README.md
 ```
 
-### Main files and folders
+The main script also calls the following functions. They must be available in the repository, one of the added subdirectories, or the parent directory:
 
-- `run_uecc_im2.m`  
-  Main entry script. It loads the dataset, performs 5-fold evaluation, trains UECC-IM2, and prints fold-level and final averaged metrics.
-
-- `BaseClassifierTrain.m`, `BaseClassifierPredict.m`  
-  Base binary classification wrapper functions.
-
-- `Train_3classes.m`, `Predict_3classes.m`  
-  Trinary-branch training and inference functions.
-
-- `label_diversity_oversampling.m`  
-  Diversity-aware minority oversampling used between ensemble rounds.
-
-- `select_best_front_preference.m`  
-  Front-label selection for the trinary branch.
-
-- `cal_IR.m`  
-  Computes label imbalance ratio.
-
-- `metrics/`  
-  Metric functions such as `MCC`, `MacroF1_each_class`, `MacroF1_minority`, `MacroF1_majority`, and `exAccu_basedMinority`.
-
-- `imbalance_characterization/`  
-  Helper functions related to imbalance characterization.
-
-- `label_order/`  
-  Helper functions for label-order related computations.
-
-- `liblinear/`  
-  LIBLINEAR dependency used by the base classifier wrapper.
-
-- `data/`  
-  Dataset files and the corresponding fold split files.
+```text
+conditional_entropy_sorting
+Train_3classes
+Predict_3classes
+label_diversity_oversampling
+MCC
+MacroF1_each_class
+MacroF1_minority
+MacroF1_majority
+exAccu_basedMinority
+```
 
 ## Requirements
 
 - MATLAB
-- LIBLINEAR available in the repository under `liblinear/`
-- Dataset `.mat` files and fold split files placed under `data/`
+- MATLAB-compatible LIBLINEAR interface
+- Dataset files prepared in the format described below
+- All dependent functions listed above
 
-## Input data format
+Place the LIBLINEAR MATLAB files in:
 
-The main script expects:
+```text
+./liblinear/
+```
 
-1. A dataset file:
-   - `data/<dataset_name>.mat`
-2. A fold file:
-   - `data/<dataset_name>_5folds.mat`
+The main script adds the following paths automatically:
 
-The dataset file should contain a matrix named `num`.
+```matlab
+addpath('./data/');
+addpath('./metrics/');
+addpath('../');
+addpath('./imbalance_characterization/');
+addpath('./label order/');
+addpath('./liblinear/');
+```
 
-The script then splits `num` into:
-- feature matrix `x`
-- label matrix `y`
+Make sure these paths are valid relative to the working directory from which `run_uecc_im2.m` is executed.
 
-For the default configuration in `run_uecc_im2.m`, the code uses:
+## Dataset Format
+
+Each dataset requires two MATLAB files.
+
+### 1. Data file
+
+```text
+<dataname>.mat
+```
+
+The file must contain a variable named `num`:
+
+```matlab
+load([dataname, '.mat'], 'num');
+```
+
+`num` must store the feature matrix and label matrix in the following order:
+
+```text
+num = [features, labels]
+```
+
+For example, the current `flags` configuration is:
 
 ```matlab
 x = num(:, 1:19);
 y = num(:, 20:end);
 ```
 
-which corresponds to the `mlc_flags` setting in the current script.
+The script also provides column ranges for several datasets:
 
-The script also contains commented split examples for several other datasets. To switch datasets, update:
-- `dataname`
-- the feature/label column split in the dataset section
+```matlab
+% enron:             x = num(:, 1:1001); y = num(:, 1002:end);
+% emotions:          x = num(:, 1:72);   y = num(:, 73:end);
+% birds:             x = num(:, 1:260);  y = num(:, 261:end);
+% scene:             x = num(:, 1:294);  y = num(:, 295:end);
+% yeast:             x = num(:, 1:103);  y = num(:, 104:end);
+% CAL500:            x = num(:, 1:68);   y = num(:, 69:end);
+% bibtex after FS:   x = num(:, 1:184);  y = num(:, 185:end);
+```
 
-## How to run
+Input labels are expected to use `{0,1}`. The script converts `0` to `-1` before training and evaluation.
 
-From MATLAB, open the repository root and run:
+### 2. Cross-validation file
+
+```text
+<dataname>_5folds.mat
+```
+
+The file must contain:
+
+```matlab
+train_ind
+test_ind
+```
+
+Both variables are expected to be five-element cell arrays. Each cell contains the row indices for one training or test fold.
+
+## Running the Code
+
+### Step 1: Prepare dependencies
+
+Confirm that:
+
+- LIBLINEAR is available under `./liblinear/`;
+- all helper functions are on the MATLAB path;
+- the dataset and fold files are stored under `./data/`.
+
+### Step 2: Configure the dataset
+
+Edit the basic settings in `run_uecc_im2.m`:
+
+```matlab
+dataname = 'mlc_flags';
+```
+
+Then set the correct feature and label column ranges:
+
+```matlab
+x = num(:, 1:19);
+y = num(:, 20:end);
+```
+
+### Step 3: Run the experiment
+
+From the repository directory, execute:
 
 ```matlab
 run_uecc_im2
 ```
 
-The script will:
-
-1. add required paths
-2. load the selected dataset and fold indices
-3. run 5-fold cross-validation
-4. print fold-level metrics
-5. print final averaged metrics across the 5 folds
-
-## Reported metrics
-
-The current code reports these final metrics:
-
-- **MacroF1_each_class**: multi-label Macro-F1 computed from class-wise F1 aggregation
-- **MCC**: average label-wise Matthews correlation coefficient
-- **MacroF1_minority**: average minority-oriented F1 across labels
-- **MacroF1_majority**: average majority-oriented F1 across labels
-- **ExAcc**: example-based accuracy computed by treating the minority class of each label as the positive class
-
-`ExAcc` is computed by:
+The random seed is fixed by:
 
 ```matlab
-exAccu_basedMinority(y_test, final_output)
+rng(1);
 ```
 
-## Notes on the current implementation
+This preserves reproducibility for operations that depend on MATLAB's random-number generator.
 
-- The current script uses `rng(1)` for reproducibility.
-- The default evaluation setting is 5-fold cross-validation.
-- The current code keeps several internal containers to preserve the original execution behavior.
-- The present implementation uses `ensemble_times = 3` and `bins_number = 10` in the main script.
-- The final result displayed at the end of the script is the mean of the first row of each fold’s stored metric matrix.
+## Main Hyperparameters
 
-## Example output
+The current implementation uses the following settings.
 
-The script prints per-fold values and then final averages such as:
+| Parameter | Current value | Role |
+|---|---:|---|
+| `ensemble_times` | `3` | Number of progressively updated ensemble members |
+| `bins_number` | `10` | Number of minority-sample difficulty bins |
+| `bin_length` | `1 / bins_number` | Width of each difficulty interval |
+| model-selection IR threshold | `1.5` | Enables trinary-model selection only for imbalanced labels |
+| oversampling IR threshold | `3` | Separates the two oversampling-budget rules |
+| random seed | `1` | Controls reproducibility |
+
+These values are experimental hyperparameters and should be examined through sensitivity analysis when the method is evaluated on new datasets.
+
+## Label-Wise Feature Selection
+
+For each target label, the script constructs an auxiliary input space from:
 
 ```text
-Final MacroF1_each_class = ...
-Final MCC = ...
-Final MacroF1_minority = ...
-Final MacroF1_majority = ...
-Final ExAcc = ...
+original features + all other labels
 ```
 
-## Citation / description
+The function:
 
-If you use this repository, please cite the corresponding UECC-IM2 paper or thesis chapter once it is publicly available.
+```matlab
+featureSelection_improved
+```
 
-## Disclaimer
+returns the selected indices for the current target label. The selected subset is stored in:
 
-This repository reflects the current research code version prepared for experiment reproduction and GitHub release. It is intended for academic use and further extension rather than as a polished software package.
+```matlab
+x_fs{fold, label}
+```
+
+When the trinary candidate is constructed, the selected FRONT label is added to the current label-specific input subset when necessary.
+
+## Binary and Trinary Candidate Models
+
+For each ensemble member and each target label, the script trains:
+
+```matlab
+classifier2
+```
+
+as the binary candidate and:
+
+```matlab
+classifier_3_1
+classifier_3_2
+```
+
+as the trinary candidate.
+
+The FRONT label is selected using:
+
+```matlab
+front_label = select_best_front_preference(...);
+```
+
+The candidate model is chosen according to training MCC:
+
+```matlab
+if MCC_train3 > MCC_train2 && IR_origin > 1.5
+    use the trinary candidate
+else
+    use the binary candidate
+end
+```
+
+The selected predictions are appended to the extended feature space and may therefore be used by subsequent label-wise classifiers.
+
+## Difficulty-Aware Diversity-Driven Oversampling
+
+For a minority-class sample, the script defines its difficulty from the selected model's probability assigned to the true minority class:
+
+```matlab
+difficulty = 1 - probability_of_true_minority_class;
+```
+
+The difficulty range is divided into ten bins. The oversampling budget assigned to each bin is proportional to the accumulated difficulty of the minority samples in that bin.
+
+Within each bin, samples are selected by:
+
+```matlab
+label_diversity_oversampling
+```
+
+The selected sample indices are appended to the label-specific training index set for the next ensemble member. The implementation duplicates indices rather than generating synthetic feature vectors.
+
+## Ensemble Prediction
+
+Each ensemble member produces one complete multi-label prediction matrix. The final output is obtained by summing the member predictions and applying sign-based majority voting:
+
+```matlab
+final_output(final_output >= 0) = 1;
+final_output(final_output < 0) = -1;
+```
+
+With an odd number of ensemble members, this gives an unambiguous majority decision. The current configuration uses three members.
+
+## Evaluation Metrics
+
+The script reports the following metrics:
+
+- `MacroF1_each_class`
+- mean label-wise `MCC`
+- mean `MacroF1_minority`
+- mean `MacroF1_majority`
+- `exAccu_basedMinority`
+
+The final five-fold averages are stored in:
+
+```matlab
+stats_avg
+```
+
+with the following order:
+
+```text
+[MacroF1_each_class,
+ mean MCC,
+ mean MacroF1_minority,
+ mean MacroF1_majority,
+ exAccu_basedMinority]
+```
+
+Additional experiment outputs include:
+
+| Variable | Description |
+|---|---|
+| `stats_cell` | Fold-level metric matrices |
+| `pred_cell` | Fold-level prediction matrices |
+| `x_fs` | Label-specific selected feature indices |
+| `MCC_train2_matrix` | Training MCC of binary candidates |
+| `MCC_train3_matrix` | Training MCC of trinary candidates |
+| `IR_update_matrix` | Label-wise imbalance ratios after index updating |
+
+## Current Implementation Notes
+
+The following points describe the present behavior of `run_uecc_im2.m`.
+
+1. The script computes a SCUMBLE-based label ordering but subsequently resets:
+
+   ```matlab
+   label_order = 1:q;
+   ```
+
+   Therefore, the current execution uses the original label order.
+
+2. The variables:
+
+   ```matlab
+   alf
+   training_data_ratio
+   ```
+
+   are retained in the script but are not used by the main training and evaluation process.
+
+3. Although several result containers are initialized for ten repetitions, the current loop is:
+
+   ```matlab
+   for experiment_times = 1:1
+   ```
+
+   Therefore, each fold is executed once.
+
+4. `pred_cell` is initialized as a `5 × 10` cell array, and the single prediction matrix from each fold is copied into all ten cells of that fold.
+
+5. The script expects all helper functions and directories referenced by `addpath` to exist. Missing functions or unresolved relative paths will stop execution.
+
+6. The normalization:
+
+   ```matlab
+   average_prob_each_interval = ...
+       average_prob_each_interval ./ sum(average_prob_each_interval);
+   ```
+
+   assumes that the total accumulated minority-sample difficulty is nonzero. A zero-sum safeguard should be added when adapting the code to datasets containing degenerate labels or empty candidate bins.
+
+## Adapting the Code to a New Dataset
+
+To run UECC-IM2 on another dataset:
+
+1. Save the combined feature-label matrix as `num`.
+2. Create five-fold `train_ind` and `test_ind` cell arrays.
+3. Store both `.mat` files under `./data/`.
+4. Update `dataname`.
+5. Update the feature/label column split.
+6. Verify that every label contains both classes in each training fold.
+7. Check that all metric functions use the same `{-1,+1}` encoding.
+8. Reassess the ensemble size, bin count, and IR thresholds through sensitivity analysis.
+
+## Citation
+
+When using this implementation in academic work, cite the associated study:
+
+> Tielin Wang et al. *Updatable Ensemble Classifier Chains for Joint Class-Imbalance Mitigation in Multi-Label Classification*.
+
+Publication metadata should be added here after the final bibliographic record becomes available.
+
+## License
+
+No license file is specified in the current repository structure. Add an explicit `LICENSE` file before public redistribution so that permitted use, modification, and distribution are clearly defined.
